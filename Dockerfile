@@ -20,8 +20,11 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 # Copy application code
 COPY . .
 
+# Create uploads and outputs directories
+RUN mkdir -p backend/uploads backend/outputs
+
 # Expose port
 EXPOSE 8080
 
-# Run the application with Gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--timeout", "300", "--chdir", "backend", "app:app"]
+# Run the application with Gunicorn using PORT env var
+CMD gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 2 --timeout 300 --chdir backend app:app
