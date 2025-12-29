@@ -204,6 +204,19 @@ def process_video_async(analysis_id, input_path, output_path, user_id=None):
                 if analysis:
                     analysis.update_status('failed', error=str(e))
 
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint"""
+    return jsonify({
+        'status': 'ok',
+        'message': 'Tennis Analysis API is running',
+        'endpoints': {
+            'health': '/api/health',
+            'upload': '/api/upload',
+            'auth': '/api/auth/*'
+        }
+    })
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -405,5 +418,6 @@ if __name__ == '__main__':
         db.create_all()
         print("Database tables created successfully!")
     
-    print("Server will run on http://localhost:5000")
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
+    port = int(os.getenv('PORT', 5000))
+    print(f"Server will run on port {port}")
+    app.run(debug=True, host='0.0.0.0', port=port, threaded=True)
