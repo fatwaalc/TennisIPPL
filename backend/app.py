@@ -23,6 +23,9 @@ from auth import auth_bp
 
 app = Flask(__name__)
 
+# Configuration
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Database Configuration
 # Use SQLite as fallback if DATABASE_URL not provided
 DATABASE_URL = os.getenv('DATABASE_URL', None)
