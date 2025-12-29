@@ -411,10 +411,6 @@ Here is a screenshot from one of the output videos:
 
 ![Screenshot](output_videos/screenshot.jpeg)
 
-## 📄 License
-
-MIT License - Free to use for personal and commercial projects
-
 ## 🙏 Acknowledgments
 
 - [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) - Player detection
