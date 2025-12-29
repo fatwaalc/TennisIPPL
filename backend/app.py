@@ -18,8 +18,8 @@ load_dotenv()
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PARENT_DIR)
 from main import main as analyze_video
-from models import db, User, Analysis
-from auth import auth_bp
+from backend.models import db, User, Analysis
+from backend.auth import auth_bp
 
 app = Flask(__name__)
 
