@@ -1,0 +1,7 @@
+input_videos/
+output_videos/
+runs/
+.git/
+__pycache__/
+*.mp4
+*.avi
