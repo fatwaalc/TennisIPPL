@@ -1,25 +1,47 @@
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 from werkzeug.utils import secure_filename
 import os
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 import json
 import subprocess
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add parent directory to path to import main
 PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PARENT_DIR)
 from main import main as analyze_video
+from models import db, User, Analysis
+from auth import auth_bp
 
 app = Flask(__name__)
+
+# Database Configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://localhost/tennis_analysis')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'jwt-secret-key-change-in-production')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
+
+# Initialize extensions
+db.init_app(app)
+jwt = JWTManager(app)
+
+# Register blueprints
+app.register_blueprint(auth_bp, url_prefix='/api/auth')
+
 CORS(app, resources={
     r"/api/*": {
         "origins": ["http://localhost:3000"],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
+        "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+        "allow_headers": ["Content-Type", "Authorization"]
     }
 })
 
@@ -66,12 +88,19 @@ load_status()
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def process_video_async(analysis_id, input_path, output_path):
+def process_video_async(analysis_id, input_path, output_path, user_id=None):
     """Process video in background thread"""
     try:
         print(f"[{analysis_id}] Starting video processing...")
         print(f"[{analysis_id}] Current working directory: {os.getcwd()}")
         print(f"[{analysis_id}] Parent directory: {PARENT_DIR}")
+        
+        # Update database status
+        if user_id:
+            with app.app_context():
+                analysis = Analysis.query.get(analysis_id)
+                if analysis:
+                    analysis.update_status('processing', progress=10)
         
         # Change to parent directory to access models
         original_cwd = os.getcwd()
@@ -132,6 +161,14 @@ def process_video_async(analysis_id, input_path, output_path):
         processing_status[analysis_id]['completedTime'] = datetime.now().isoformat()
         save_status()
         
+        # Update database
+        if user_id:
+            with app.app_context():
+                analysis = Analysis.query.get(analysis_id)
+                if analysis:
+                    analysis.output_filename = os.path.basename(output_path)
+                    analysis.update_status('completed', progress=100)
+        
         print(f"[{analysis_id}] Video processing completed successfully!")
         
     except Exception as e:
@@ -150,6 +187,13 @@ def process_video_async(analysis_id, input_path, output_path):
         processing_status[analysis_id]['error'] = str(e)
         processing_status[analysis_id]['progress'] = 0
         save_status()
+        
+        # Update database
+        if user_id:
+            with app.app_context():
+                analysis = Analysis.query.get(analysis_id)
+                if analysis:
+                    analysis.update_status('failed', error=str(e))
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -161,9 +205,17 @@ def health_check():
     })
 
 @app.route('/api/upload', methods=['POST'])
+@jwt_required(optional=True)  # Optional JWT - allow guest uploads
 def upload_video():
     """Upload video endpoint"""
     print("Received upload request")
+    
+    # Get current user if authenticated
+    current_user_id = None
+    try:
+        current_user_id = get_jwt_identity()
+    except:
+        pass  # Guest upload
     
     # Check if file is present
     if 'video' not in request.files:
@@ -202,7 +254,20 @@ def upload_video():
         
         print(f"Output will be saved to: {output_path}")
         
-        # Initialize processing status
+        # Save to database if user is authenticated
+        if current_user_id:
+            analysis = Analysis(
+                id=analysis_id,
+                user_id=current_user_id,
+                input_filename=input_filename,
+                status='queued',
+                progress=0
+            )
+            db.session.add(analysis)
+            db.session.commit()
+            print(f"Analysis saved to database for user {current_user_id}")
+        
+        # Initialize processing status (for backward compatibility)
         processing_status[analysis_id] = {
             'status': 'queued',
             'progress': 0,
@@ -214,7 +279,7 @@ def upload_video():
         save_status()
         
         # Start processing in background thread
-        thread = threading.Thread(target=process_video_async, args=(analysis_id, input_path, output_path))
+        thread = threading.Thread(target=process_video_async, args=(analysis_id, input_path, output_path, current_user_id))
         thread.daemon = True
         thread.start()
         
@@ -278,25 +343,58 @@ def download_video(filename):
     return send_file(video_path, as_attachment=True, download_name='tennis_analysis.mp4')
 
 @app.route('/api/analyses', methods=['GET'])
+@jwt_required()
 def list_analyses():
-    """List all analyses"""
-    analyses = []
-    for analysis_id, status_info in processing_status.items():
-        analyses.append({
-            'analysisId': analysis_id,
-            'status': status_info['status'],
-            'uploadedTime': status_info.get('uploadedTime'),
-            'completedTime': status_info.get('completedTime')
-        })
-    
-    # Sort by upload time, newest first
-    analyses.sort(key=lambda x: x.get('uploadedTime', ''), reverse=True)
-    
-    return jsonify({'analyses': analyses}), 200
+    """List all analyses for current user"""
+    try:
+        current_user_id = get_jwt_identity()
+        
+        # Get analyses from database
+        analyses = Analysis.query.filter_by(user_id=current_user_id).order_by(Analysis.created_at.desc()).all()
+        
+        return jsonify({
+            'analyses': [analysis.to_dict() for analysis in analyses]
+        }), 200
+        
+    except Exception as e:
+        print(f"Error listing analyses: {str(e)}")
+        return jsonify({'error': 'Failed to list analyses'}), 500
+
+@app.route('/api/analyses/history', methods=['GET'])
+@jwt_required()
+def get_user_history():
+    """Get user analysis history with pagination"""
+    try:
+        current_user_id = get_jwt_identity()
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        
+        # Query with pagination
+        pagination = Analysis.query.filter_by(user_id=current_user_id).order_by(
+            Analysis.created_at.desc()
+        ).paginate(page=page, per_page=per_page, error_out=False)
+        
+        return jsonify({
+            'analyses': [analysis.to_dict() for analysis in pagination.items],
+            'total': pagination.total,
+            'page': page,
+            'per_page': per_page,
+            'pages': pagination.pages
+        }), 200
+        
+    except Exception as e:
+        print(f"Error getting history: {str(e)}")
+        return jsonify({'error': 'Failed to get history'}), 500
 
 if __name__ == '__main__':
     print("Starting Flask backend server...")
     print(f"Upload folder: {UPLOAD_FOLDER}")
     print(f"Output folder: {OUTPUT_FOLDER}")
+    
+    # Create database tables
+    with app.app_context():
+        db.create_all()
+        print("Database tables created successfully!")
+    
     print("Server will run on http://localhost:5000")
     app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
