@@ -104,6 +104,10 @@ models/*.pth
 *.pt
 *.pth
 
+# Allow required models (LFS)
+!models/yolo5_last.pt
+!models/keypoints_model.pth
+
 # Tracker stubs (cache files)
 tracker_stubs/*.pkl
 
