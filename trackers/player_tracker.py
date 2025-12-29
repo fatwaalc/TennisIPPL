@@ -2,6 +2,7 @@ from ultralytics import YOLO
 import cv2
 import pickle
 import sys
+import numpy as np
 sys.path.append('../')
 from utils import measure_distance, get_center_of_bbox
 
@@ -9,28 +10,86 @@ class PlayerTracker:
     def __init__(self,model_path):
         self.model = YOLO(model_path)
 
+    def _get_court_roi(self, court_keypoints, pad_ratio=0.05):
+        """Get court ROI from keypoints with padding"""
+        pts = np.array(court_keypoints).reshape(-1, 2)
+        min_x, min_y = pts.min(axis=0)
+        max_x, max_y = pts.max(axis=0)
+        w, h = max_x - min_x, max_y - min_y
+        pad_x, pad_y = w * pad_ratio, h * pad_ratio
+        return (min_x - pad_x, min_y - pad_y, max_x + pad_x, max_y + pad_y)
+
+    def _bbox_center(self, bbox):
+        x1, y1, x2, y2 = bbox
+        return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+    
+    def _bbox_area(self, bbox):
+        x1, y1, x2, y2 = bbox
+        return max(0, x2 - x1) * max(0, y2 - y1)
+    
+    def _inside_roi(self, x, y, roi):
+        x1, y1, x2, y2 = roi
+        return x >= x1 and x <= x2 and y >= y1 and y <= y2
+
     def choose_and_filter_players(self, court_keypoints, player_detections):
-        player_detections_first_frame = player_detections[0]
-        chosen_player = self.choose_players(court_keypoints, player_detections_first_frame)
-        filtered_player_detections = []
+        """Filter and consistently remap players to ID 1 (bottom) and 2 (top)"""
+        roi = self._get_court_roi(court_keypoints, pad_ratio=0.05)
+        min_area = 2000  # Minimum bbox area to filter out small detections
+        
+        # Get court center Y for better filtering
+        pts = np.array(court_keypoints).reshape(-1, 2)
+        court_center_y = pts[:, 1].mean()
+        court_height = pts[:, 1].max() - pts[:, 1].min()
+        
+        filtered_detections = []
+        last_valid = None
+        
         for player_dict in player_detections:
-            filtered_player_dict = {track_id: bbox for track_id, bbox in player_dict.items() if track_id in chosen_player}
-            filtered_player_detections.append(filtered_player_dict)
-        
-        # Remap track IDs to 1 and 2 consistently
-        remapped_player_detections = []
-        track_id_mapping = {chosen_player[0]: 1, chosen_player[1]: 2}
-        
-        for player_dict in filtered_player_detections:
-            remapped_dict = {}
+            # Filter by ROI, area, and position
+            valid_players = []
             for track_id, bbox in player_dict.items():
-                if track_id in track_id_mapping:
-                    remapped_dict[track_id_mapping[track_id]] = bbox
-            remapped_player_detections.append(remapped_dict)
+                cx, cy = self._bbox_center(bbox)
+                area = self._bbox_area(bbox)
+                
+                # Must be inside ROI
+                if not self._inside_roi(cx, cy, roi):
+                    continue
+                
+                # Must have minimum area
+                if area < min_area:
+                    continue
+                
+                # Must be in reasonable Y range (not too far above/below court)
+                y_distance_from_center = abs(cy - court_center_y)
+                if y_distance_from_center > court_height * 0.6:
+                    continue
+                
+                valid_players.append((track_id, bbox, cy, area))
+            
+            # Sort by area (largest first) and take top 2
+            valid_players.sort(key=lambda x: x[3], reverse=True)
+            best_two = valid_players[:2]
+            
+            if len(best_two) == 2:
+                # Sort by Y position: higher Y (bottom) = 1, lower Y (top) = 2
+                best_two.sort(key=lambda x: x[2], reverse=True)
+                remapped = {
+                    1: best_two[0][1],  # Bottom player
+                    2: best_two[1][1]   # Top player
+                }
+                last_valid = remapped
+            elif last_valid is not None:
+                # Use last valid detection to maintain stability
+                remapped = last_valid
+            else:
+                remapped = {}
+            
+            filtered_detections.append(remapped)
         
-        return remapped_player_detections
+        return filtered_detections
 
     def choose_players(self, court_keypoints, player_dict):
+        """Legacy method - kept for compatibility"""
         distances = []
         for track_id, bbox in player_dict.items():
             player_center = get_center_of_bbox(bbox)
@@ -43,10 +102,8 @@ class PlayerTracker:
                     min_distance = distance
             distances.append((track_id, min_distance))
         
-        # sorrt the distances in ascending order
         distances.sort(key = lambda x: x[1])
-        # Choose the first 2 tracks
-        chosen_players = [distances[0][0], distances[1][0]]
+        chosen_players = [distances[0][0], distances[1][0]] if len(distances) >= 2 else []
         return chosen_players
 
 

@@ -30,6 +30,8 @@ def main(input_video_path="input_videos/input_video.mp4", output_video_path="out
                                                      stub_path="tracker_stubs/ball_detections.pkl"
                                                      )
     ball_detections = ball_tracker.interpolate_ball_positions(ball_detections)
+    # Smooth ball positions to remove extreme outliers while keeping natural movement
+    ball_detections = ball_tracker.smooth_ball_positions(ball_detections, max_jump_px=200, alpha=0.4)
     
     
     # Court Line Detector model

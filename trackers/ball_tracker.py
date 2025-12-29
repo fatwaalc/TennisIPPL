@@ -2,10 +2,71 @@ from ultralytics import YOLO
 import cv2
 import pickle
 import pandas as pd
+import math
 
 class BallTracker:
     def __init__(self,model_path):
         self.model = YOLO(model_path)
+
+    def smooth_ball_positions(self, ball_positions, max_jump_px=200, alpha=0.4):
+        """Smooth ball positions and remove outlier jumps"""
+        smoothed = []
+        prev_center = None
+        prev_bbox = None
+        consecutive_missing = 0
+        max_consecutive_missing = 2
+        
+        for det in ball_positions:
+            if not det or 1 not in det:
+                consecutive_missing += 1
+                if consecutive_missing <= max_consecutive_missing and prev_bbox is not None:
+                    # Keep using previous bbox for very short gaps
+                    smoothed.append({1: prev_bbox})
+                else:
+                    smoothed.append(det)
+                continue
+            
+            bbox = det[1]
+            if not bbox or len(bbox) != 4:
+                consecutive_missing += 1
+                if consecutive_missing <= max_consecutive_missing and prev_bbox is not None:
+                    smoothed.append({1: prev_bbox})
+                else:
+                    smoothed.append(det)
+                continue
+            
+            consecutive_missing = 0
+            x1, y1, x2, y2 = bbox
+            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+            
+            if prev_center is not None:
+                # Check for extreme outlier jumps only
+                dx = cx - prev_center[0]
+                dy = cy - prev_center[1]
+                dist = math.sqrt(dx*dx + dy*dy)
+                
+                if dist > max_jump_px:
+                    # Skip extreme outlier, use previous bbox
+                    if prev_bbox is not None:
+                        smoothed.append({1: prev_bbox})
+                        continue
+                    else:
+                        smoothed.append({})
+                        continue
+                
+                # Gentle EMA smoothing - let ball move naturally
+                cx = alpha * cx + (1 - alpha) * prev_center[0]
+                cy = alpha * cy + (1 - alpha) * prev_center[1]
+                
+                # Rebuild bbox with smoothed center
+                w, h = x2 - x1, y2 - y1
+                bbox = [cx - w/2, cy - h/2, cx + w/2, cy + h/2]
+            
+            prev_center = (cx, cy)
+            prev_bbox = bbox
+            smoothed.append({1: bbox})
+        
+        return smoothed
 
     def interpolate_ball_positions(self, ball_positions):
         ball_positions = [x.get(1,[]) for x in ball_positions]
