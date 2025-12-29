@@ -16,7 +16,19 @@ class PlayerTracker:
         for player_dict in player_detections:
             filtered_player_dict = {track_id: bbox for track_id, bbox in player_dict.items() if track_id in chosen_player}
             filtered_player_detections.append(filtered_player_dict)
-        return filtered_player_detections
+        
+        # Remap track IDs to 1 and 2 consistently
+        remapped_player_detections = []
+        track_id_mapping = {chosen_player[0]: 1, chosen_player[1]: 2}
+        
+        for player_dict in filtered_player_detections:
+            remapped_dict = {}
+            for track_id, bbox in player_dict.items():
+                if track_id in track_id_mapping:
+                    remapped_dict[track_id_mapping[track_id]] = bbox
+            remapped_player_detections.append(remapped_dict)
+        
+        return remapped_player_detections
 
     def choose_players(self, court_keypoints, player_dict):
         distances = []
