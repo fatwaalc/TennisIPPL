@@ -24,7 +24,13 @@ from auth import auth_bp
 app = Flask(__name__)
 
 # Database Configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'postgresql://localhost/tennis_analysis')
+# Use SQLite as fallback if DATABASE_URL not provided
+DATABASE_URL = os.getenv('DATABASE_URL', None)
+if DATABASE_URL and DATABASE_URL.startswith('postgres://'):
+    # Fix Railway's postgres:// to postgresql://
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or f'sqlite:///{os.path.join(BASE_DIR, "tennis.db")}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'jwt-secret-key-change-in-production')
