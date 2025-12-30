@@ -57,12 +57,16 @@ app.register_blueprint(auth_bp, url_prefix='/api/auth')
 # CORS Configuration - get from environment variable
 CORS_ORIGINS = [origin.strip() for origin in os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')]
 print(f"CORS Origins configured: {CORS_ORIGINS}")
+
+# Apply CORS to all routes with explicit configuration
+from flask_cors import cross_origin
 CORS(app, 
-     origins=CORS_ORIGINS,
+     resources={r"/*": {"origins": CORS_ORIGINS}},
      methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-     allow_headers=["Content-Type", "Authorization"],
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
      supports_credentials=True,
-     expose_headers=["Content-Type", "Authorization"]
+     expose_headers=["Content-Type", "Authorization"],
+     max_age=3600
 )
 
 # Configuration
@@ -223,6 +227,18 @@ def process_video_async(analysis_id, input_path, output_path, user_id=None):
                 if analysis:
                     analysis.update_status('failed', error=str(e))
 
+# Add CORS headers to all responses
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    if origin in CORS_ORIGINS:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Max-Age', '3600')
+    return response
+
 @app.route('/', methods=['GET'])
 def root():
     """Root endpoint"""
@@ -236,19 +252,24 @@ def root():
         }
     })
 
-@app.route('/api/health', methods=['GET'])
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
 def health_check():
     """Health check endpoint"""
+    if request.method == 'OPTIONS':
+        return '', 204
     return jsonify({
         'status': 'healthy',
         'message': 'Backend server is running',
         'timestamp': datetime.now().isoformat()
     })
 
-@app.route('/api/upload', methods=['POST'])
+@app.route('/api/upload', methods=['POST', 'OPTIONS'])
 @jwt_required(optional=True)  # Optional JWT - allow guest uploads
 def upload_video():
     """Upload video endpoint"""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
     print("Received upload request")
     
     # Get current user if authenticated
