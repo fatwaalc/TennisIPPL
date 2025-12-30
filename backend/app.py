@@ -43,6 +43,14 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
 db.init_app(app)
 jwt = JWTManager(app)
 
+# Create database tables on startup
+with app.app_context():
+    try:
+        db.create_all()
+        print("✅ Database tables created/verified successfully!")
+    except Exception as e:
+        print(f"⚠️ Database initialization error: {e}")
+
 # Register blueprints
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 
