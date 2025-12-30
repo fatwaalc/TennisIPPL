@@ -41,7 +41,7 @@ class Analysis(db.Model):
     __tablename__ = 'analyses'
     
     id = db.Column(db.String(36), primary_key=True)  # UUID
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)  # Allow guest uploads
     
     # Video info
     input_filename = db.Column(db.String(255), nullable=False)
