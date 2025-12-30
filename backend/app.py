@@ -55,11 +55,20 @@ with app.app_context():
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 
 # CORS Configuration - get from environment variable
-CORS_ORIGINS = [origin.strip() for origin in os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')]
-print(f"CORS Origins configured: {CORS_ORIGINS}")
+cors_env = os.getenv('CORS_ORIGINS', 'http://localhost:3000')
+print(f"Raw CORS_ORIGINS from env: '{cors_env}'")
+CORS_ORIGINS = [origin.strip() for origin in cors_env.split(',')]
+print(f"Parsed CORS Origins: {CORS_ORIGINS}")
+
+# Hardcode production domain for Railway (temporary debug)
+if 'http://localhost:3000' in CORS_ORIGINS and len(CORS_ORIGINS) == 1:
+    CORS_ORIGINS.append('https://compassionate-trust-production-afa9.up.railway.app')
+    print(f"Added production domain. Final CORS Origins: {CORS_ORIGINS}")
 
 # Apply CORS with flask-cors only
+print("Initializing CORS...")
 CORS(app, origins=CORS_ORIGINS, supports_credentials=True)
+print("CORS initialized successfully!")
 
 # Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
