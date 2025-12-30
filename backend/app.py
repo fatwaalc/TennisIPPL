@@ -106,12 +106,11 @@ def process_video_async(analysis_id, input_path, output_path, user_id=None):
         print(f"[{analysis_id}] Current working directory: {os.getcwd()}")
         print(f"[{analysis_id}] Parent directory: {PARENT_DIR}")
         
-        # Update database status
-        if user_id:
-            with app.app_context():
-                analysis = Analysis.query.get(analysis_id)
-                if analysis:
-                    analysis.update_status('processing', progress=10)
+        # Update database status (works for both authenticated and guest uploads)
+        with app.app_context():
+            analysis = Analysis.query.get(analysis_id)
+            if analysis:
+                analysis.update_status('processing', progress=10)
         
         # Change to parent directory to access models
         original_cwd = os.getcwd()
@@ -172,13 +171,12 @@ def process_video_async(analysis_id, input_path, output_path, user_id=None):
         processing_status[analysis_id]['completedTime'] = datetime.now().isoformat()
         save_status()
         
-        # Update database
-        if user_id:
-            with app.app_context():
-                analysis = Analysis.query.get(analysis_id)
-                if analysis:
-                    analysis.output_filename = os.path.basename(output_path)
-                    analysis.update_status('completed', progress=100)
+        # Update database (works for both authenticated and guest uploads)
+        with app.app_context():
+            analysis = Analysis.query.get(analysis_id)
+            if analysis:
+                analysis.output_filename = os.path.basename(output_path)
+                analysis.update_status('completed', progress=100)
         
         print(f"[{analysis_id}] Video processing completed successfully!")
         
@@ -198,6 +196,16 @@ def process_video_async(analysis_id, input_path, output_path, user_id=None):
         processing_status[analysis_id]['error'] = str(e)
         processing_status[analysis_id]['progress'] = 0
         save_status()
+        
+        # Update database on error
+        try:
+            with app.app_context():
+                analysis = Analysis.query.get(analysis_id)
+                if analysis:
+                    analysis.error_message = str(e)
+                    analysis.update_status('failed', progress=0)
+        except Exception as db_error:
+            print(f"[{analysis_id}] Failed to update database on error: {db_error}")
         
         # Update database
         if user_id:
@@ -278,18 +286,17 @@ def upload_video():
         
         print(f"Output will be saved to: {output_path}")
         
-        # Save to database if user is authenticated
-        if current_user_id:
-            analysis = Analysis(
-                id=analysis_id,
-                user_id=current_user_id,
-                input_filename=input_filename,
-                status='queued',
-                progress=0
-            )
-            db.session.add(analysis)
-            db.session.commit()
-            print(f"Analysis saved to database for user {current_user_id}")
+        # Save to database (for both authenticated and guest users)
+        analysis = Analysis(
+            id=analysis_id,
+            user_id=current_user_id,  # Will be None for guest uploads
+            input_filename=input_filename,
+            status='queued',
+            progress=0
+        )
+        db.session.add(analysis)
+        db.session.commit()
+        print(f"Analysis saved to database (user_id: {current_user_id or 'guest'})")
         
         # Initialize processing status (for backward compatibility)
         processing_status[analysis_id] = {
@@ -326,14 +333,27 @@ def get_analysis_status(analysis_id):
     """Get analysis status endpoint"""
     print(f"Status check for: {analysis_id}")
     
-    if analysis_id not in processing_status:
-        print(f"Analysis ID not found: {analysis_id}")
-        return jsonify({'error': 'Analysis ID not found'}), 404
+    # Try to get from database first
+    analysis = Analysis.query.filter_by(id=analysis_id).first()
+    if analysis:
+        print(f"Found in database. Status: {analysis.status}")
+        return jsonify({
+            'status': analysis.status,
+            'progress': analysis.progress,
+            'inputFile': analysis.input_filename,
+            'outputFile': analysis.output_filename,
+            'error': analysis.error_message,
+            'uploadedTime': analysis.created_at.isoformat() if analysis.created_at else None
+        }), 200
     
-    status_info = processing_status[analysis_id]
-    print(f"Current status: {status_info['status']}")
+    # Fallback to in-memory status for guest uploads
+    if analysis_id in processing_status:
+        status_info = processing_status[analysis_id]
+        print(f"Found in memory. Status: {status_info['status']}")
+        return jsonify(status_info), 200
     
-    return jsonify(status_info), 200
+    print(f"Analysis ID not found: {analysis_id}")
+    return jsonify({'error': 'Analysis ID not found'}), 404
 
 @app.route('/api/video/<filename>', methods=['GET'])
 def stream_video(filename):
