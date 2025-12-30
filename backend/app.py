@@ -55,7 +55,8 @@ with app.app_context():
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 
 # CORS Configuration - get from environment variable
-CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')
+CORS_ORIGINS = [origin.strip() for origin in os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')]
+print(f"CORS Origins configured: {CORS_ORIGINS}")
 CORS(app, resources={
     r"/api/*": {
         "origins": CORS_ORIGINS,
