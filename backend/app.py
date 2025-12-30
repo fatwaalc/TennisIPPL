@@ -57,13 +57,13 @@ app.register_blueprint(auth_bp, url_prefix='/api/auth')
 # CORS Configuration - get from environment variable
 CORS_ORIGINS = [origin.strip() for origin in os.getenv('CORS_ORIGINS', 'http://localhost:3000').split(',')]
 print(f"CORS Origins configured: {CORS_ORIGINS}")
-CORS(app, resources={
-    r"/api/*": {
-        "origins": CORS_ORIGINS,
-        "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-        "allow_headers": ["Content-Type", "Authorization"]
-    }
-})
+CORS(app, 
+     origins=CORS_ORIGINS,
+     methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+     allow_headers=["Content-Type", "Authorization"],
+     supports_credentials=True,
+     expose_headers=["Content-Type", "Authorization"]
+)
 
 # Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
